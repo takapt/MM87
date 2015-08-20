@@ -69,6 +69,7 @@ typedef unsigned long long ull;
 const int DX[] = { 0, 1, 0, -1 };
 const int DY[] = { 1, 0, -1, 0 };
 
+#ifdef LOCAL
 class Population
 {
 public:
@@ -82,6 +83,7 @@ public:
         return res;
     }
 };
+#endif
 
 
 struct Rect
