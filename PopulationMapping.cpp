@@ -165,6 +165,8 @@ public:
     }
 };
 
+
+#ifdef LOCAL
 int main()
 {
     int max_percentage;
@@ -182,3 +184,4 @@ int main()
         cout << s << endl;
     cout.flush();
 }
+#endif
