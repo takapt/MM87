@@ -108,7 +108,7 @@ public:
 
         const SurveyResult survey_result = survey(max_percentage, world_map, total_population);
         int opt_area = survey_result.opt_area;
-        return survey_result.selected;
+//         return survey_result.selected;
 
         const int box_h = h / 5;
         const int box_w = w / 5;
@@ -186,7 +186,7 @@ private:
         const int h = world_map.size(), w = world_map[0].size();
 
         vector<Rect> smalls;
-        const int S = 10;
+        const int S = 40;
         for (int y = 0; y < h; y += S)
         {
             for (int x = 0; x < w; x += S)
@@ -251,7 +251,6 @@ private:
         erep(j, w * h)
             if (dp[cur][j] <= max_population)
                 opt_area = j;
-        dump(dp[cur][opt_area]);
         vector<Rect> use_r;
         vector<bool> used_i(smalls.size());
         for (int i = use[smalls.size()][opt_area], j = opt_area; j > 0; )
@@ -265,7 +264,6 @@ private:
             i = use[i][j];
         }
         assert(use_r.size() > 0);
-        dump(use_r.size());
         vector<string> res(h, string(w, '.'));
         for (auto& rect : use_r)
         {
