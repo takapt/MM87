@@ -85,6 +85,10 @@ public:
 };
 #endif
 
+#ifdef LOCAL
+int survey_size = 20;
+#endif
+
 
 struct Rect
 {
@@ -108,7 +112,7 @@ public:
 
         const SurveyResult survey_result = survey(max_percentage, world_map, total_population);
         int opt_area = survey_result.opt_area;
-//         return survey_result.selected;
+        return survey_result.selected;
 
         const int box_h = h / 5;
         const int box_w = w / 5;
@@ -186,23 +190,26 @@ private:
         const int h = world_map.size(), w = world_map[0].size();
 
         vector<Rect> smalls;
-        const int S = 40;
+        const int S = survey_size;
         for (int y = 0; y < h; y += S)
         {
             for (int x = 0; x < w; x += S)
             {
-                int p = Population::queryRegion(x, y, min(x + S - 1, w - 1), min(y + S - 1, h - 1));
-                if (p)
+                Rect r(x, y, min(x + S, w), min(y + S, h));
+                r.area = 0;
+                for (int i = r.low_y; i < r.high_y; ++i)
+                    for (int j = r.low_x; j < r.high_x; ++j)
+                        if (world_map[i][j] == 'X')
+                            ++r.area;
+                if (r.area > 0)
                 {
-                    Rect r(x, y, min(x + S, w), min(y + S, h));
-                    r.pop = p;
-                    r.area = 0;
-                    for (int i = r.low_y; i < r.high_y; ++i)
-                        for (int j = r.low_x; j < r.high_x; ++j)
-                            if (world_map[i][j] == 'X')
-                                ++r.area;
-                    assert(r.area > 0);
-                    smalls.push_back(r);
+                    int p = Population::queryRegion(x, y, min(x + S - 1, w - 1), min(y + S - 1, h - 1));
+                    if (p)
+                    {
+                        r.pop = p;
+                        assert(r.area > 0);
+                        smalls.push_back(r);
+                    }
                 }
             }
         }
@@ -289,8 +296,11 @@ private:
 
 
 #ifdef LOCAL
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc > 1)
+        survey_size = to_T<int>(argv[1]);
+
     int max_percentage;
     cin >> max_percentage;
     int height;
