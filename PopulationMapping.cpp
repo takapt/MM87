@@ -186,7 +186,7 @@ private:
         const int h = world_map.size(), w = world_map[0].size();
 
         vector<Rect> smalls;
-        const int S = 20;
+        const int S = 10;
         for (int y = 0; y < h; y += S)
         {
             for (int x = 0; x < w; x += S)
@@ -217,37 +217,41 @@ private:
         //             }
         //             sum += smalls[i].pop;
         //         }
-        //         return vector<string>(h, string(w, '.'));
 
         int opt_area;
-        static int dp[1024][512 * 512];
-        static int use[1024][512 * 512];
-        assert(smalls.size() < 1024);
-        clr(use, -1);
-        erep(i, smalls.size()) erep(j, w * h)
-            dp[i][j] = max_population + 1;
+        int cur = 0, next = 1;
+        int dp[2][512 * 512];
+        vector<vector<short>> use(smalls.size() + 1, vector<short>(w * h + 1, -1));
+        erep(j, w * h)
+            dp[0][j] = max_population + 1;
         dp[0][0] = 0;
         rep(i, smalls.size())
         {
+            erep(j, w * h)
+                dp[next][j] = max_population + 1;
+
             const auto& r = smalls[i];
             for (int j = w * h; j >= 0; --j)
             {
-                if (dp[i][j] < dp[i + 1][j])
+                if (dp[cur][j] < dp[next][j])
                 {
-                    dp[i + 1][j] = dp[i][j];
+                    dp[next][j] = dp[cur][j];
                     use[i + 1][j] = use[i][j];
                 }
 
-                if (dp[i][j] <= max_population && j + r.area <= w * h && dp[i + 1][j + r.area] > dp[i][j] + r.pop)
+                if (dp[cur][j] <= max_population && j + r.area <= w * h && dp[next][j + r.area] > dp[cur][j] + r.pop)
                 {
-                    upmin(dp[i + 1][j + r.area], dp[i][j] + r.pop);
+                    upmin(dp[next][j + r.area], dp[cur][j] + r.pop);
                     use[i + 1][j + r.area] = i;
                 }
             }
+
+            swap(cur, next);
         }
         erep(j, w * h)
-            if (dp[smalls.size()][j] <= max_population)
+            if (dp[cur][j] <= max_population)
                 opt_area = j;
+        dump(dp[cur][opt_area]);
         vector<Rect> use_r;
         vector<bool> used_i(smalls.size());
         for (int i = use[smalls.size()][opt_area], j = opt_area; j > 0; )
