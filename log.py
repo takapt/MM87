@@ -42,7 +42,7 @@ def single(seeds):
 
 def multi(seeds):
     from multiprocessing import Pool
-    pool = Pool(2)
+    pool = Pool()
     results = pool.map(get_score, seeds)
     for result in results:
         seed = result['seed']
@@ -50,8 +50,8 @@ def multi(seeds):
         sys.stdout.flush()
 
 try:
-    single(range(1, 10))
-#     multi(range(1, 500))
+#     single(range(1, 10))
+    multi(range(1, 500))
 finally:
     os.remove(copied_exe_path)
 

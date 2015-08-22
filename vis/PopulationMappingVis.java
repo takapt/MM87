@@ -138,6 +138,7 @@ public class PopulationMappingVis {
     // ----------------------------------------------------------------------------------
     public int queryRegion(int x1, int y1, int x2, int y2) {
         if (x1 > x2 || y1 > y2 || x1 < 0 || x2 > width - 1 || y1 < 0 || y2 > height - 1) {
+            System.out.printf("(%4d, %4d), (%4d, %4d)\n", x1, y1, x2, y2);
             failedQueries = true;
             return -1;
         }

@@ -106,6 +106,10 @@ public:
         const int h = world_map.size(), w = world_map[0].size();
         vector<vector<bool>> selected(h, vector<bool>(w));
 
+        const SurveyResult survey_result = survey(max_percentage, world_map, total_population);
+        int opt_area = survey_result.opt_area;
+        return survey_result.selected;
+
         const int box_h = h / 5;
         const int box_w = w / 5;
         vector<Rect> rects;
@@ -156,6 +160,8 @@ public:
             }
         }
 
+        fprintf(stderr, "my / opt: %8d %8d, %2.3f\n", best_area, opt_area, (double)best_area / opt_area);
+
         vector<string> res(h, string(w, '.'));
         for (auto& rect : best)
         {
@@ -165,6 +171,118 @@ public:
         }
         return res;
     }
+
+private:
+#ifdef LOCAL
+    struct SurveyResult
+    {
+        int opt_area;
+        vector<Rect> used_rects;
+        vector<string> selected;
+    };
+    SurveyResult survey(int max_percentage, vector <string> world_map, int total_population)
+    {
+        const int max_population = (ll)total_population * max_percentage / 100;
+        const int h = world_map.size(), w = world_map[0].size();
+
+        vector<Rect> smalls;
+        const int S = 20;
+        for (int y = 0; y < h; y += S)
+        {
+            for (int x = 0; x < w; x += S)
+            {
+                int p = Population::queryRegion(x, y, min(x + S - 1, w - 1), min(y + S - 1, h - 1));
+                if (p)
+                {
+                    Rect r(x, y, min(x + S, w), min(y + S, h));
+                    r.pop = p;
+                    r.area = 0;
+                    for (int i = r.low_y; i < r.high_y; ++i)
+                        for (int j = r.low_x; j < r.high_x; ++j)
+                            if (world_map[i][j] == 'X')
+                                ++r.area;
+                    assert(r.area > 0);
+                    smalls.push_back(r);
+                }
+            }
+        }
+        sort(all(smalls), [](const Rect& a, const Rect& b){ return a.pop > b.pop; });
+        ll ss = accumulate(all(smalls), 0, [](int s, const Rect& r){ return s + r.pop; });
+        ll sum = 0;
+        //         rep(i, smalls.size())
+        //         {
+        //             if (i % (smalls.size() / 20) == 0)
+        //             {
+        //                 fprintf(stderr, "%5d (%4.2f): %9lld (%4.2f)\n", i, (double)i / smalls.size(), sum, (double)sum / ss);
+        //             }
+        //             sum += smalls[i].pop;
+        //         }
+        //         return vector<string>(h, string(w, '.'));
+
+        int opt_area;
+        static int dp[1024][512 * 512];
+        static int use[1024][512 * 512];
+        assert(smalls.size() < 1024);
+        clr(use, -1);
+        erep(i, smalls.size()) erep(j, w * h)
+            dp[i][j] = max_population + 1;
+        dp[0][0] = 0;
+        rep(i, smalls.size())
+        {
+            const auto& r = smalls[i];
+            for (int j = w * h; j >= 0; --j)
+            {
+                if (dp[i][j] < dp[i + 1][j])
+                {
+                    dp[i + 1][j] = dp[i][j];
+                    use[i + 1][j] = use[i][j];
+                }
+
+                if (dp[i][j] <= max_population && j + r.area <= w * h && dp[i + 1][j + r.area] > dp[i][j] + r.pop)
+                {
+                    upmin(dp[i + 1][j + r.area], dp[i][j] + r.pop);
+                    use[i + 1][j + r.area] = i;
+                }
+            }
+        }
+        erep(j, w * h)
+            if (dp[smalls.size()][j] <= max_population)
+                opt_area = j;
+        vector<Rect> use_r;
+        vector<bool> used_i(smalls.size());
+        for (int i = use[smalls.size()][opt_area], j = opt_area; j > 0; )
+        {
+            assert(0 <= i && i < smalls.size());
+            assert(!used_i[i]);
+            used_i[i] = true;
+            use_r.push_back(smalls[i]);
+            assert(smalls[i].area > 0);
+            j -= smalls[i].area;
+            i = use[i][j];
+        }
+        assert(use_r.size() > 0);
+        dump(use_r.size());
+        vector<string> res(h, string(w, '.'));
+        for (auto& rect : use_r)
+        {
+            int a = 0;
+            for (int y = rect.low_y; y < rect.high_y; ++y)
+                for (int x = rect.low_x; x < rect.high_x; ++x)
+                {
+                    assert(res[y][x] == '.');
+                    res[y][x] = 'X';
+                    if (world_map[y][x] == 'X')
+                        ++a;
+                }
+            assert(a == rect.area);
+        }
+        return SurveyResult {
+            .opt_area = opt_area,
+            .used_rects = use_r,
+            .selected = res
+        };
+    }
+#endif
 };
 
 
