@@ -1,0 +1,1 @@
+javac PopulationMappingVis.java && jar cmf manifest.mf tester.jar *class && mv tester.jar ..

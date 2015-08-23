@@ -112,7 +112,7 @@ public:
 
         const SurveyResult survey_result = survey(max_percentage, world_map, total_population);
         int opt_area = survey_result.opt_area;
-        return survey_result.selected;
+//         return survey_result.selected;
 
         const int box_h = h / 5;
         const int box_w = w / 5;
