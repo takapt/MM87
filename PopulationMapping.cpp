@@ -69,6 +69,108 @@ typedef unsigned long long ull;
 const int DX[] = { 0, 1, 0, -1 };
 const int DY[] = { 1, 0, -1, 0 };
 
+
+ull rdtsc()
+{
+#ifdef __amd64
+    ull a, d;
+    __asm__ volatile ("rdtsc" : "=a" (a), "=d" (d));
+    return (d<<32) | a;
+#else
+    ull x;
+    __asm__ volatile ("rdtsc" : "=A" (x));
+    return x;
+#endif
+}
+#ifdef LOCAL
+const double CYCLES_PER_SEC = 3.30198e9;
+#else
+const double CYCLES_PER_SEC = 2.5e9;
+#endif
+double get_absolute_sec()
+{
+    return (double)rdtsc() / CYCLES_PER_SEC;
+}
+#ifdef _MSC_VER
+#include <Windows.h>
+    double get_ms() { return (double)GetTickCount64() / 1000; }
+#else
+#include <sys/time.h>
+    double get_ms() { struct timeval t; gettimeofday(&t, NULL); return (double)t.tv_sec * 1000 + (double)t.tv_usec / 1000; }
+#endif
+
+#define USE_RDTSC
+class Timer
+{
+private:
+    double start_time;
+    double elapsed;
+
+#ifdef USE_RDTSC
+    double get_sec() { return get_absolute_sec(); }
+#else
+    double get_sec() { return get_ms() / 1000; }
+#endif
+
+public:
+    Timer() {}
+
+    void start() { start_time = get_sec(); }
+    double get_elapsed() { return elapsed = get_sec() - start_time; }
+};
+
+class Random
+{
+private:
+    unsigned int  x, y, z, w;
+public:
+    Random(unsigned int x
+             , unsigned int y
+             , unsigned int z
+             , unsigned int w)
+        : x(x), y(y), z(z), w(w) { }
+    Random()
+        : x(123456789), y(362436069), z(521288629), w(88675123) { }
+    Random(unsigned int seed)
+        : x(123456789), y(362436069), z(521288629), w(seed) { }
+
+    unsigned int next()
+    {
+        unsigned int t = x ^ (x << 11);
+        x = y;
+        y = z;
+        z = w;
+        return w = (w ^ (w >> 19)) ^ (t ^ (t >> 8));
+    }
+
+    int next_int() { return next(); }
+
+    // [0, upper)
+    int next_int(int upper) { return next() % upper; }
+
+    // [low, high]
+    int next_int(int low, int high) { return next_int(high - low + 1) + low; }
+
+    double next_double(double upper) { return upper * next() / UINT_MAX; }
+    double next_double(double low, double high) { return next_double(high - low) + low; }
+
+    template <typename T>
+    int select(const vector<T>& ratio)
+    {
+        T sum = accumulate(ratio.begin(), ratio.end(), (T)0);
+        T v = next_double(sum) + (T)1e-6;
+        for (int i = 0; i < (int)ratio.size(); ++i)
+        {
+            v -= ratio[i];
+            if (v <= 0)
+                return i;
+        }
+        return 0;
+    }
+};
+Random g_rand;
+
+
 #ifdef LOCAL
 class Population
 {
@@ -90,6 +192,13 @@ int survey_size = 20;
 #endif
 
 
+int query_region(int low_x, int low_y, int high_x, int high_y)
+{
+    assert(low_x < high_x);
+    assert(low_y < high_y);
+    return Population::queryRegion(low_x, low_y, high_x - 1, high_y - 1);
+}
+
 struct Rect
 {
     Rect(int low_x, int low_y, int high_x, int high_y) :
@@ -101,6 +210,202 @@ struct Rect
     int area = 0;
     int pop = -1;
 };
+
+class World
+{
+public:
+    World(const vector<string>& s) :
+        h(s.size()), w(s[0].size())
+    {
+        rep(y, h) rep(x, w)
+            if (s[y][x] == 'X')
+                f[index(x, y)] = true;
+    }
+
+    bool is_land(int x, int y) const
+    {
+        return f[index(x, y)];
+    }
+
+    int area(int low_x, int low_y, int high_x, int high_y) const
+    {
+        int c = 0;
+        for (int y = low_y; y < high_y; ++y)
+            for (int x = low_x; x < high_x; ++x)
+                if (is_land(x, y))
+                    ++c;
+        return c;
+    }
+
+    int width() const { return w; }
+    int height() const {return h; }
+
+private:
+    int index(int x, int y) const
+    {
+        assert(in_rect(x, y, w, h));
+        return x | (y << 9);
+    }
+
+    const int h, w;
+    bitset<512 * 512> f;
+};
+
+struct Region
+{
+    Region(int low_x, int low_y, int high_x, int high_y, int area, ll pop) :
+        low_x(low_x), low_y(low_y), high_x(high_x), high_y(high_y), area(area), pop(pop)
+    {
+        assert(low_x < high_x);
+        assert(low_y < high_y);
+    }
+
+    bool intersect(const Region& other) const
+    {
+        return low_x < other.high_x && other.low_x < high_x &&
+               low_y < other.high_y && other.low_y < high_y &&
+               !contain(other) && !other.contain(*this);
+    }
+
+    bool contain(const Region& other) const
+    {
+        return low_x <= other.low_x && other.high_x <= high_x &&
+               low_y <= other.low_y && other.high_y <= high_y;
+    }
+
+    int low_x, low_y, high_x, high_y;
+    int area;
+    ll pop;
+};
+
+struct RegionNode
+{
+    RegionNode(const Region& region) :
+        region(region)
+    {
+    }
+
+    ~RegionNode()
+    {
+        for (RegionNode* child : childs)
+            delete child;
+    }
+
+    RegionNode* copy_tree() const
+    {
+        RegionNode* copy_node = new RegionNode(*this);
+        for (RegionNode*& child : copy_node->childs)
+            child = child->copy_tree();
+        return copy_node;
+    }
+
+    void add_child(RegionNode* node)
+    {
+        childs.push_back(node);
+    }
+
+    int area_except_childs() const
+    {
+        int area = region.area;
+        for (RegionNode* child : childs)
+            area -= child->region.area;
+        return area;
+    }
+
+    ll pop_except_childs() const
+    {
+        int pop = region.pop;
+        for (RegionNode* child : childs)
+            pop -= child->region.pop;
+        return pop;
+    }
+
+    void iterate(const function<void(const RegionNode*)>& callback) const
+    {
+        callback(this);
+        for (const RegionNode* child : childs)
+            child->iterate(callback);
+    }
+
+    void iterate(const function<void(RegionNode*)>& callback)
+    {
+        callback(this);
+        for (RegionNode* child : childs)
+            child->iterate(callback);
+    }
+
+    Region region;
+
+private:
+    vector<RegionNode*> childs;
+};
+
+struct City
+{
+    City(int x, int y, int scale) :
+        x(x), y(y), scale(scale)
+    {
+        assert(1 <= scale && scale <= 5);
+    }
+
+    int x, y, scale;
+};
+
+class PopMap
+{
+public:
+    PopMap(int w, int h) :
+        w(w), h(h), p{}
+    {
+    }
+
+    ll pop(int x, int y) const
+    {
+        assert(in_rect(x, y, w, h));
+        return p[y][x];
+    }
+
+    ll pop(int low_x, int low_y, int high_x, int high_y) const
+    {
+        ll pp = 0;
+        for (int y = low_y; y < high_y; ++y)
+            for (int x = low_x; x < high_x; ++x)
+                pp += pop(x, y);
+        return pp;
+    }
+
+    void set_pop(int x, int y, int po)
+    {
+        assert(in_rect(x, y, w, h));
+        p[y][x] = po;
+    }
+
+private:
+    int w, h;
+    int p[500][512];
+};
+
+vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
+{
+    const ll inf = ten(9);
+    const int max_area = region_tree->region.area;
+    vector<ll> min_pop(max_area + 1, inf); // min_pop[area] -> min pop
+    min_pop[0] = 0;
+    const auto callback = [&](const RegionNode* node) {
+        const int area = node->area_except_childs();
+        const ll pop = node->pop_except_childs();
+        for (int i = max_area - area; i >= 0; --i)
+            upmin(min_pop[i + area], min_pop[i] + pop);
+    };
+    region_tree->iterate(callback);
+    return min_pop;
+}
+vector<Region> search_queries(const World& world, const PopMap& pop_map, const ll max_population, const RegionNode* fixed_region_tree)
+{
+    unique_ptr<RegionNode> region_tree(fixed_region_tree->copy_tree());
+}
+
+
 class PopulationMapping
 {
 public:
@@ -109,6 +414,8 @@ public:
         const int max_population = (ll)total_population * max_percentage / 100;
         const int h = world_map.size(), w = world_map[0].size();
         vector<vector<bool>> selected(h, vector<bool>(w));
+
+        World world(world_map);
 
         const SurveyResult survey_result = survey(max_percentage, world_map, total_population);
         int opt_area = survey_result.opt_area;
@@ -124,10 +431,7 @@ public:
                 int hy = min(ly + box_h, h);
                 int hx = min(lx + box_w, w);
                 Rect rect(lx, ly, hx, hy);
-                for (int y = ly; y < hy; ++y)
-                    for (int x = lx; x < hx; ++x)
-                        if (world_map[y][x] == 'X')
-                            ++rect.area;
+                rect.area = world.area(lx, ly, hx, hy);
                 rects.push_back(rect);
             }
         }
@@ -137,7 +441,7 @@ public:
         assert(rects.size() >= qs);
         rects.erase(rects.begin() + qs, rects.end());
         rep(i, qs)
-            rects[i].pop = Population::queryRegion(rects[i].low_x, rects[i].low_y, rects[i].high_x - 1, rects[i].high_y - 1);
+            rects[i].pop = query_region(rects[i].low_x, rects[i].low_y, rects[i].high_x, rects[i].high_y);
 
         int best_area = 0;
         vector<Rect> best;
@@ -188,6 +492,7 @@ private:
     {
         const int max_population = (ll)total_population * max_percentage / 100;
         const int h = world_map.size(), w = world_map[0].size();
+        World world(world_map);
 
         vector<Rect> smalls;
         const int S = survey_size;
@@ -196,14 +501,10 @@ private:
             for (int x = 0; x < w; x += S)
             {
                 Rect r(x, y, min(x + S, w), min(y + S, h));
-                r.area = 0;
-                for (int i = r.low_y; i < r.high_y; ++i)
-                    for (int j = r.low_x; j < r.high_x; ++j)
-                        if (world_map[i][j] == 'X')
-                            ++r.area;
+                r.area = world.area(x, y, r.high_x, r.high_y);
                 if (r.area > 0)
                 {
-                    int p = Population::queryRegion(x, y, min(x + S - 1, w - 1), min(y + S - 1, h - 1));
+                    int p = query_region(x, y, r.high_x, r.high_y);
                     if (p)
                     {
                         r.pop = p;
@@ -225,20 +526,25 @@ private:
         //             sum += smalls[i].pop;
         //         }
 
+        const int total_area = world.area(0, 0, world.width(), world.height());
+
+        Timer timer;
+        timer.start();
+        dump(smalls.size());
         int opt_area;
         int cur = 0, next = 1;
         int dp[2][512 * 512];
-        vector<vector<short>> use(smalls.size() + 1, vector<short>(w * h + 1, -1));
-        erep(j, w * h)
+        vector<vector<short>> use(smalls.size() + 1, vector<short>(total_area + 1, -1));
+        erep(j, total_area)
             dp[0][j] = max_population + 1;
         dp[0][0] = 0;
         rep(i, smalls.size())
         {
-            erep(j, w * h)
+            erep(j, total_area)
                 dp[next][j] = max_population + 1;
 
             const auto& r = smalls[i];
-            for (int j = w * h; j >= 0; --j)
+            for (int j = total_area; j >= 0; --j)
             {
                 if (dp[cur][j] < dp[next][j])
                 {
@@ -246,7 +552,7 @@ private:
                     use[i + 1][j] = use[i][j];
                 }
 
-                if (dp[cur][j] <= max_population && j + r.area <= w * h && dp[next][j + r.area] > dp[cur][j] + r.pop)
+                if (dp[cur][j] <= max_population && j + r.area <= total_area && dp[next][j + r.area] > dp[cur][j] + r.pop)
                 {
                     upmin(dp[next][j + r.area], dp[cur][j] + r.pop);
                     use[i + 1][j + r.area] = i;
@@ -255,9 +561,10 @@ private:
 
             swap(cur, next);
         }
-        erep(j, w * h)
+        erep(j, total_area)
             if (dp[cur][j] <= max_population)
                 opt_area = j;
+        dump(timer.get_elapsed());
         vector<Rect> use_r;
         vector<bool> used_i(smalls.size());
         for (int i = use[smalls.size()][opt_area], j = opt_area; j > 0; )
@@ -274,16 +581,12 @@ private:
         vector<string> res(h, string(w, '.'));
         for (auto& rect : use_r)
         {
-            int a = 0;
             for (int y = rect.low_y; y < rect.high_y; ++y)
                 for (int x = rect.low_x; x < rect.high_x; ++x)
                 {
                     assert(res[y][x] == '.');
                     res[y][x] = 'X';
-                    if (world_map[y][x] == 'X')
-                        ++a;
                 }
-            assert(a == rect.area);
         }
         return SurveyResult {
             .opt_area = opt_area,
