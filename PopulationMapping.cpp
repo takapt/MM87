@@ -259,11 +259,32 @@ struct Region
         assert(low_x < high_x);
         assert(low_y < high_y);
     }
+    Region(int low_x, int low_y, int high_x, int high_y) :
+        low_x(low_x), low_y(low_y), high_x(high_x), high_y(high_y), area(-1), pop(-1)
+    {
+        assert(low_x < high_x);
+        assert(low_y < high_y);
+    }
 
+    void move(int dx, int dy)
+    {
+        low_x += dx;
+        high_x += dx;
+        low_y += dy;
+        high_y += dy;
+    }
+
+    // true if either region contains the other
     bool intersect(const Region& other) const
     {
         return low_x < other.high_x && other.low_x < high_x &&
-               low_y < other.high_y && other.low_y < high_y &&
+               low_y < other.high_y && other.low_y < high_y;
+    }
+
+    // false if either region contains the other
+    bool intersect_on_side(const Region& other) const
+    {
+        return intersect(other) &&
                !contain(other) && !other.contain(*this);
     }
 
@@ -273,6 +294,15 @@ struct Region
                low_y <= other.low_y && other.high_y <= high_y;
     }
 
+    bool is_valid() const
+    {
+        if (low_x < 0 || low_y < 0 || low_x >= 500 || low_y >= 500)
+            return false;
+        if (area < 0 || pop < 0)
+            return false;
+        return true;
+    }
+
     int low_x, low_y, high_x, high_y;
     int area;
     ll pop;
@@ -280,8 +310,8 @@ struct Region
 
 struct RegionNode
 {
-    RegionNode(const Region& region, RegionNode* parent) :
-        region(region), parent(parent)
+    RegionNode(const Region& region, RegionNode* parent, bool fixed = false) :
+        region(region), parent(parent), fixed(fixed)
     {
     }
 
@@ -294,16 +324,48 @@ struct RegionNode
 
     unique_ptr<RegionNode> copy_tree(RegionNode* parent = nullptr) const
     {
-        unique_ptr<RegionNode> copy_node(new RegionNode(region, parent));
+        unique_ptr<RegionNode> copy_node(new RegionNode(region, parent, fixed));
         copy_node->childs.reserve(childs.size());
         for (auto& child : childs)
             copy_node->childs.push_back(child->copy_tree(copy_node.get()));
         return copy_node;
     }
 
-    void add_child(unique_ptr<RegionNode> node)
+    const vector<unique_ptr<RegionNode>>& childs_nodes() const
     {
-        childs.push_back(move(node));
+        return childs;
+    }
+
+    void add_child_region(const Region& reg)
+    {
+        assert(region.contain(reg));
+        assert(!intersect_with_child(reg));
+        childs.push_back(unique_ptr<RegionNode>(new RegionNode(reg, this, false)));
+    }
+
+    void remove_child_region(const RegionNode* node_to_remove)
+    {
+        auto it = childs.begin();
+        while (it != childs.end() && it->get() != node_to_remove)
+            ++it;
+        assert(it != childs.end());
+        childs.erase(it);
+    }
+
+    bool intersect_with_child(const Region& reg) const
+    {
+        for (auto& child : childs)
+            if (reg.intersect(child->region))
+                return true;
+        return false;
+    }
+
+    bool intersect_with_child_on_side(const Region& reg) const
+    {
+        for (auto& child : childs)
+            if (reg.intersect_on_side(child->region))
+                return true;
+        return false;
     }
 
     int area_except_childs() const
@@ -338,8 +400,36 @@ struct RegionNode
             child->iterate(callback);
     }
 
+    int tree_size() const
+    {
+        int size = 0;
+        iterate([&](const RegionNode*) { ++size; });
+        return size;
+    }
+
+    vector<RegionNode*> list_all(bool ignore_fixed)
+    {
+        vector<RegionNode*> nodes;
+        iterate([&](RegionNode* no) {
+            if (!fixed || !ignore_fixed)
+                nodes.push_back(no);
+        });
+        return nodes;
+    }
+    vector<RegionNode*> list_leaves(bool ignore_fixed)
+    {
+        vector<RegionNode*> nodes;
+        iterate([&](RegionNode* no) {
+            if (no->childs.empty() && (!fixed || !ignore_fixed))
+                nodes.push_back(no);
+        });
+        return nodes;
+    }
+
     Region region;
     RegionNode* parent;
+
+    bool fixed = false;
 
 private:
     vector<unique_ptr<RegionNode>> childs;
@@ -414,7 +504,134 @@ vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
 
 vector<Region> search_queries(const World& world, const PopMap& pop_map, const ll max_population, const RegionNode* fixed_region_tree)
 {
-    unique_ptr<RegionNode> region_tree = fixed_region_tree->copy_tree();
+    const auto generate_region = [&](const RegionNode* tree_) -> unique_ptr<RegionNode>
+    {
+        auto tree = tree_->copy_tree();
+        auto nodes = tree->list_all(true);
+        if (nodes.empty())
+            return nullptr;
+
+        RegionNode* target_region_node = nodes[g_rand.next_int(nodes.size())];
+        const Region& target = target_region_node->region;
+
+        int low_x = g_rand.next_int(target.low_x, target.high_x);
+        int low_y = g_rand.next_int(target.low_y, target.high_y);
+        int high_x = g_rand.next_int(low_x, target.high_x) + 1;
+        int high_y = g_rand.next_int(low_y, target.high_y) + 1;
+        Region added_region(low_x, low_y, high_x, high_y);
+        assert(target.contain(added_region));
+        if (target_region_node->intersect_with_child(added_region))
+            return nullptr;
+
+        added_region.area = world.area(low_x, low_y, high_x, high_y);
+        added_region.pop = pop_map.pop(low_x, low_y, high_x, high_y);
+        target_region_node->add_child_region(added_region);
+
+        return tree;
+    };
+
+    const auto remove_region = [](const RegionNode* tree_) -> unique_ptr<RegionNode>
+    {
+        auto tree = tree_->copy_tree();
+        auto nodes = tree->list_leaves(true);
+        if (nodes.empty())
+            return nullptr;
+
+        RegionNode* remove_node = nodes[g_rand.next_int(nodes.size())];
+        remove_node->parent->remove_child_region(remove_node);
+
+        return tree;
+    };
+
+    const auto move_region = [](const RegionNode* tree_) -> unique_ptr<RegionNode>
+    {
+        auto tree = tree_->copy_tree();
+        auto nodes = tree->list_all(true);
+        if (nodes.empty())
+            return nullptr;
+
+        RegionNode* move_region_node = nodes[g_rand.next_int(nodes.size())];
+        const RegionNode* parent = move_region_node->parent;
+        const Region& parent_region = parent->region;
+
+        Region move_region = move_region_node->region;
+        // [low, high]
+        int low_dx = -20, high_dx = 20, low_dy = -20, high_dy = 20;
+        upmax(low_dx, parent_region.low_x - move_region.low_x);
+        upmin(high_dx, parent_region.high_x - move_region.high_x);
+        upmax(low_dy, parent_region.low_y - move_region.low_y);
+        upmin(high_dy, parent_region.high_y - move_region.high_y);
+        for (auto& child : move_region_node->childs_nodes())
+        {
+            const Region& reg = child->region;
+            upmax(low_dx, move_region.high_x - reg.high_x);
+            upmin(high_dx, move_region.low_x - reg.low_x);
+            upmax(low_dy, move_region.high_y - reg.high_y);
+            upmin(high_dy, move_region.low_y - reg.low_y);
+        }
+        assert(low_dx <= 0 && 0 <= high_dx);
+        assert(low_dy <= 0 && 0 <= high_dy);
+        assert(low_dx <= high_dx);
+        assert(low_dy <= high_dy);
+
+        int dx = g_rand.next_int(low_dx, high_dx + 1);
+        int dy = g_rand.next_int(low_dy, high_dy + 1);
+        move_region.move(dx, dy);
+        assert(!move_region_node->parent->region.intersect_on_side(move_region));
+        assert(!move_region_node->intersect_with_child(move_region));
+        if (parent->intersect_with_child(move_region))
+            return nullptr;
+
+        move_region_node->region = move_region;
+        return tree;
+    };
+
+    const auto resize_region = [](const RegionNode* tree_) -> unique_ptr<RegionNode>
+    {
+        auto tree = tree_->copy_tree();
+        auto nodes = tree->list_all(true);
+        if (nodes.empty())
+            return nullptr;
+
+        RegionNode* resize_region_node = nodes[g_rand.next_int(nodes.size())];
+        const RegionNode* parent = resize_region_node->parent;
+        const Region& parent_region = parent->region;
+
+        Region resize_region = resize_region_node->region;
+        // [low, high]
+        int low_dx = max(-20, -(resize_region.high_x - resize_region.low_x - 1));
+        int high_dx = min(20, parent_region.high_x - resize_region.high_x);
+        int low_dy = max(-20, -(resize_region.high_y - resize_region.low_y - 1));
+        int high_dy = min(20, parent_region.high_y - resize_region.high_y);
+        for (auto& child : resize_region_node->childs_nodes())
+        {
+            const Region& reg = child->region;
+            upmax(low_dx, resize_region.high_x - reg.high_x);
+            upmax(low_dy, resize_region.high_y - reg.high_y);
+        }
+        assert(low_dx <= 0 && 0 <= high_dx);
+        assert(low_dy <= 0 && 0 <= high_dy);
+        assert(low_dx <= high_dx);
+        assert(low_dy <= high_dy);
+
+        int dx = g_rand.next_int(low_dx, high_dx + 1);
+        int dy = g_rand.next_int(low_dy, high_dy + 1);
+        resize_region.high_x += dx;
+        resize_region.high_y += dy;
+        assert(resize_region.low_x < resize_region.high_x);
+        assert(resize_region.low_y < resize_region.high_y);
+        assert(!parent_region.intersect_on_side(resize_region));
+        assert(!resize_region_node->intersect_with_child_on_side(resize_region));
+        if ((dx >= 0 || dy >= 0) && parent->intersect_with_child(resize_region))
+            return nullptr;
+
+        resize_region_node->region = resize_region;
+        return tree;
+    };
+
+    unique_ptr<RegionNode> current_tree = fixed_region_tree->copy_tree();
+    current_tree->iterate([](RegionNode* no) { no->fixed = true; });
+
     return {};
 }
 
