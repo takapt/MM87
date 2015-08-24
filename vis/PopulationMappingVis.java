@@ -239,7 +239,7 @@ public class PopulationMappingVis {
     // ------------- visualization part -----------------------------------------------------
     static int scale;
     static String exec;
-    static boolean debug, vis;
+    static boolean debug, vis, printPop = false;
     static Process proc;
     static int del;
     InputStream is;
@@ -260,6 +260,16 @@ public class PopulationMappingVis {
                 for (i = 0; i < height; ++i)
                     sb.append(map[i]).append('\n');
                 sb.append(totalPopulation).append('\n');
+                if (printPop)
+                {
+                    int h = map.length;
+                    int w = map[0].length();
+                    sb.append(h).append('\n');
+                    sb.append(w).append('\n');
+                    for (int y = 0; y < h; ++y)
+                        for (int x = 0; x < w; ++x)
+                            sb.append(pop[y][x]).append('\n');
+                }
                 os.write(sb.toString().getBytes());
                 os.flush();
 
@@ -412,6 +422,8 @@ public class PopulationMappingVis {
                 del = Integer.parseInt(args[++i]);
             if (args[i].equals("-scale"))
                 scale = Integer.parseInt(args[++i]);
+            if (args[i].equals("-pop"))
+                printPop = true;
         }
         PopulationMappingVis bw = new PopulationMappingVis(seed);
 

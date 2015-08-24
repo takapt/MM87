@@ -363,6 +363,7 @@ public:
         w(w), h(h), p{}
     {
     }
+    PopMap(){}
 
     ll pop(int x, int y) const
     {
@@ -389,6 +390,9 @@ private:
     int w, h;
     int p[500][512];
 };
+#ifdef CORRECT_POP
+PopMap correct_pop_map;
+#endif
 
 vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
 {
@@ -620,6 +624,19 @@ int main(int argc, char* argv[])
     input(world_map, height);
     int total_population;
     cin >> total_population;
+
+#ifdef CORRECT_POP
+    int h, w;
+    cin >> h >> w;
+    correct_pop_map = PopMap(w, h);
+    rep(y, h) rep(x, w)
+    {
+        int p;
+        cin >> p;
+        correct_pop_map.set_pop(x, y, p);
+    }
+    assert(correct_pop_map.pop(0, 0, w, h) == total_population);
+#endif
 
     vector<string> ret = PopulationMapping().mapPopulation(max_percentage, world_map, total_population);
     cout << ret.size() << endl;
