@@ -280,8 +280,8 @@ struct Region
 
 struct RegionNode
 {
-    RegionNode(const Region& region) :
-        region(region)
+    RegionNode(const Region& region, RegionNode* parent) :
+        region(region), parent(parent)
     {
     }
 
@@ -292,12 +292,12 @@ struct RegionNode
     }
 #endif
 
-    unique_ptr<RegionNode> copy_tree() const
+    unique_ptr<RegionNode> copy_tree(RegionNode* parent = nullptr) const
     {
-        unique_ptr<RegionNode> copy_node(new RegionNode(region));
+        unique_ptr<RegionNode> copy_node(new RegionNode(region, parent));
         copy_node->childs.reserve(childs.size());
         for (auto& child : childs)
-            copy_node->childs.push_back(child->copy_tree());
+            copy_node->childs.push_back(child->copy_tree(copy_node.get()));
         return copy_node;
     }
 
@@ -339,6 +339,7 @@ struct RegionNode
     }
 
     Region region;
+    RegionNode* parent;
 
 private:
     vector<unique_ptr<RegionNode>> childs;
