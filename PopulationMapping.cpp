@@ -191,13 +191,13 @@ public:
 int survey_size = 20;
 #endif
 
-
 int query_region(int low_x, int low_y, int high_x, int high_y)
 {
     assert(low_x < high_x);
     assert(low_y < high_y);
     return Population::queryRegion(low_x, low_y, high_x - 1, high_y - 1);
 }
+
 
 struct Rect
 {
@@ -285,59 +285,63 @@ struct RegionNode
     {
     }
 
+#ifndef NDEBUG
     ~RegionNode()
     {
-        for (RegionNode* child : childs)
-            delete child;
+        region = Region(-114514, -1919810, -114514 + 1, -1919810 + 1, -43062, -893931);
     }
+#endif
 
-    RegionNode* copy_tree() const
+    unique_ptr<RegionNode> copy_tree() const
     {
-        RegionNode* copy_node = new RegionNode(*this);
-        for (RegionNode*& child : copy_node->childs)
-            child = child->copy_tree();
+        unique_ptr<RegionNode> copy_node(new RegionNode(region));
+        copy_node->childs.reserve(childs.size());
+        for (auto& child : childs)
+            copy_node->childs.push_back(child->copy_tree());
         return copy_node;
     }
 
-    void add_child(RegionNode* node)
+    void add_child(unique_ptr<RegionNode> node)
     {
-        childs.push_back(node);
+        childs.push_back(move(node));
     }
 
     int area_except_childs() const
     {
         int area = region.area;
-        for (RegionNode* child : childs)
+        for (auto& child : childs)
             area -= child->region.area;
+        assert(area >= 0);
         return area;
     }
 
     ll pop_except_childs() const
     {
         int pop = region.pop;
-        for (RegionNode* child : childs)
+        for (auto& child : childs)
             pop -= child->region.pop;
+        assert(pop >= 0);
         return pop;
     }
 
     void iterate(const function<void(const RegionNode*)>& callback) const
     {
         callback(this);
-        for (const RegionNode* child : childs)
-            child->iterate(callback);
+        for (auto& child : childs)
+            ((const RegionNode*)child.get())->iterate(callback);
     }
 
     void iterate(const function<void(RegionNode*)>& callback)
     {
         callback(this);
-        for (RegionNode* child : childs)
+        for (auto& child : childs)
             child->iterate(callback);
     }
 
     Region region;
 
 private:
-    vector<RegionNode*> childs;
+    vector<unique_ptr<RegionNode>> childs;
 };
 
 struct City
@@ -391,7 +395,8 @@ vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
     const int max_area = region_tree->region.area;
     vector<ll> min_pop(max_area + 1, inf); // min_pop[area] -> min pop
     min_pop[0] = 0;
-    const auto callback = [&](const RegionNode* node) {
+    const auto callback = [&](const RegionNode* node)
+    {
         const int area = node->area_except_childs();
         const ll pop = node->pop_except_childs();
         for (int i = max_area - area; i >= 0; --i)
@@ -400,9 +405,11 @@ vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
     region_tree->iterate(callback);
     return min_pop;
 }
+
 vector<Region> search_queries(const World& world, const PopMap& pop_map, const ll max_population, const RegionNode* fixed_region_tree)
 {
-    unique_ptr<RegionNode> region_tree(fixed_region_tree->copy_tree());
+    unique_ptr<RegionNode> region_tree = fixed_region_tree->copy_tree();
+    return {};
 }
 
 
