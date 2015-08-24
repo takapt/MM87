@@ -148,8 +148,8 @@ public:
     // [0, upper)
     int next_int(int upper) { return next() % upper; }
 
-    // [low, high]
-    int next_int(int low, int high) { return next_int(high - low + 1) + low; }
+    // [low, high)
+    int next_int(int low, int high) { return next_int(high - low) + low; }
 
     double next_double(double upper) { return upper * next() / UINT_MAX; }
     double next_double(double low, double high) { return next_double(high - low) + low; }
@@ -390,6 +390,7 @@ private:
     int w, h;
     int p[500][512];
 };
+#define CORRECT_POP
 #ifdef CORRECT_POP
 PopMap correct_pop_map;
 #endif
