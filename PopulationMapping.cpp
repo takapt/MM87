@@ -1,5 +1,5 @@
 #ifndef LOCAL
-// #define NDEBUG
+#define NDEBUG
 #endif
 
 #include <cstdio>
@@ -403,6 +403,7 @@ struct Region
 
     int width() const { return high_x - low_x; }
     int height() const { return high_y - low_y; }
+    int rect_area() const { return width() * height(); }
 
     pair<Region, Region> split_vertical(int split_x) const
     {
@@ -646,9 +647,9 @@ struct RegionNode
         const RegionNode* min_area_node = nullptr;
         int min_area = ten(9);
         iterate([&](const RegionNode* node) {
-            if (node->region.area < min_area && node->region.contain(region))
+            if (node->region.rect_area() < min_area && node->region.contain(region))
             {
-                min_area = node->region.area;
+                min_area = node->region.rect_area();
                 min_area_node = node;
             }
         });
@@ -660,9 +661,9 @@ struct RegionNode
         RegionNode* min_area_node = nullptr;
         int min_area = ten(9);
         iterate([&](RegionNode* node) {
-            if (node->region.area < min_area && node->region.contain(region))
+            if (node->region.rect_area() < min_area && node->region.contain(region))
             {
-                min_area = node->region.area;
+                min_area = node->region.rect_area();
                 min_area_node = node;
             }
         });
@@ -751,7 +752,6 @@ struct RegionNode
 
     bool fixed = false;
 
-private:
     vector<unique_ptr<RegionNode>> childs;
 };
 
@@ -765,17 +765,18 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
     const auto eval = [&](const PopMap& pop_map)
     {
         ll sum_diff = 0;
-        const auto diff_pop = [&](const RegionNode* node)
+//         const auto diff_pop = [&](const RegionNode* node)
+        for (auto& node : fixed_tree->list_leaves(false))
         {
-            ll pop = 0;
-            node->iterate_pos_except_childs([&](int x, int y) {
-                pop += pop_map.pop(x, y);
-            });
+            ll pop = pop_map.pop(node->region);
+//             node->iterate_pos_except_childs([&](int x, int y) {
+//                 pop += pop_map.pop(x, y);
+//             });
 
-            ll diff = abs(pop - node->pop_except_childs());
+            ll diff = abs(pop - node->region.pop);
             sum_diff += diff;
         };
-        fixed_tree->iterate(diff_pop);
+//         fixed_tree->iterate(diff_pop);
         return sum_diff;
     };
 
@@ -789,7 +790,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
     PopMap current_pop_map(world.width(), world.height());
     ll current_score = eval(current_pop_map);
     int last_best_i = -1;
-    const int MAX_TRIES = 1000;
+    const int MAX_TRIES = 100;
     rep(try_i, MAX_TRIES)
     {
         vector<City> next_cities = current_cities;
@@ -907,7 +908,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             current_pop_map = next_pop_map;
         }
 
-        if (try_i - last_best_i > 0.2 * MAX_TRIES)
+        if (try_i - last_best_i > 0.1 * MAX_TRIES)
             break;
     }
 
@@ -1031,474 +1032,53 @@ BitBoard search_best_area_selection(const RegionNode* region_tree, const ll max_
     return selected;
 }
 
-unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_map, const ll max_population, const RegionNode* fixed_region_tree)
-{
-#ifndef NDEBUG
-    for (auto& node : fixed_region_tree->list_all(false))
-    {
-        assert(node->fixed);
-        const Region& reg = node->region;
-        assert(reg.area == world.count(reg.low_x, reg.low_y, reg.high_x, reg.high_y));
-#ifdef CORRECT_POP
-        assert(reg.pop == correct_pop_map.pop(reg.low_x, reg.low_y, reg.high_x, reg.high_y));
-#endif
-    }
-#endif
-
-    const int total_area = world.count(0, 0, world.width(), world.height());
-    const ll total_population = pop_map.pop(0, 0, world.width(), world.height());
-    int gens = 0;
-    int gen_succ = 0;
-    const auto generate_region = [&](const RegionNode* tree_) -> unique_ptr<RegionNode>
-    {
-        auto tree = tree_->copy_tree();
-        auto nodes = tree->list_all(false);
-        if (nodes.empty())
-            return nullptr;
-        ++gens;
-
-        vector<ll> select_ratio(nodes.size());
-        rep(i, nodes.size())
-//             select_ratio[i] = nodes[i]->region.area;
-            select_ratio[i] = (double)nodes[i]->region.area / total_area + (double)nodes[i]->pop_except_childs() / max_population;
-        RegionNode* target_region_node = nodes[g_rand.select(select_ratio)];
-        const Region& target = target_region_node->region;
-
-        int low_x = g_rand.next_int(target.low_x, target.high_x);
-        int low_y = g_rand.next_int(target.low_y, target.high_y);
-        int high_x = g_rand.next_int(low_x, target.high_x) + 1;
-        int high_y = g_rand.next_int(low_y, target.high_y) + 1;
-        Region added_region(low_x, low_y, high_x, high_y);
-        assert(target.contain(added_region));
-        if (target_region_node->intersect_with_child(added_region))
-            return nullptr;
-        if (added_region == target)
-            return nullptr;
-
-        added_region.area = world.count(low_x, low_y, high_x, high_y);
-        added_region.pop = pop_map.pop(low_x, low_y, high_x, high_y);
-        target_region_node->add_child_region(added_region);
-
-        assert(tree->is_valid_tree());
-
-        ++gen_succ;
-        return tree;
-    };
-
-    int rems = 0;
-    int rem_succ = 0;
-    const auto remove_region = [&](const RegionNode* tree_) -> unique_ptr<RegionNode>
-    {
-        ++rems;
-        auto tree = tree_->copy_tree();
-        auto nodes = tree->list_all(true);
-        if (nodes.empty())
-            return nullptr;
-
-        RegionNode* remove_node = nodes[g_rand.next_int(nodes.size())];
-        remove_node->parent->remove_child_region(remove_node);
-
-        assert(tree->is_valid_tree());
-
-        ++rem_succ;
-        return tree;
-    };
-
-    int mvs = 0;
-    int mv_succ = 0;
-    const auto move_region = [&](const RegionNode* tree_) -> unique_ptr<RegionNode>
-    {
-        auto tree = tree_->copy_tree();
-        auto nodes = tree->list_all(true);
-        if (nodes.empty())
-            return nullptr;
-        ++mvs;
-
-        RegionNode* move_region_node = nodes[g_rand.next_int(nodes.size())];
-        const RegionNode* parent = move_region_node->parent;
-        const Region& parent_region = parent->region;
-
-        const Region& move_region = move_region_node->region;
-        Region moved_region(-114514, -1919810, -114514 + 1, -1919810 + 1);
-        const int MAX_MOVE = 20;
-        switch (g_rand.next_int(4))
-        {
-            case 0: // right
-                {
-                    int max_dx = min(MAX_MOVE, parent_region.high_x - move_region.high_x);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != move_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.low_x >= move_region.high_x && intersect(move_region.low_y, move_region.high_y, reg.low_y, reg.high_y))
-                                upmin(max_dx, reg.low_x - move_region.high_x);
-                        }
-                    }
-                    for (auto& child : move_region_node->childs_nodes())
-                        upmin(max_dx, child->region.low_x - move_region.low_x);
-
-                    assert(max_dx >= 0);
-                    if (max_dx == 0)
-                        return nullptr;
-
-                    int dx = 1 + g_rand.next_int(max_dx);
-                    moved_region = move_region.moved(dx, 0, world, pop_map);
-                    break;
-                }
-            case 1: // left
-                {
-                    int max_dx = min(MAX_MOVE, move_region.low_x - parent_region.low_x);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != move_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.high_x <= move_region.low_x && intersect(move_region.low_y, move_region.high_y, reg.low_y, reg.high_y))
-                                upmin(max_dx, move_region.low_x - reg.high_x);
-                        }
-                    }
-                    for (auto& child : move_region_node->childs_nodes())
-                        upmin(max_dx, move_region.high_x - child->region.high_x);
-                    assert(max_dx >= 0);
-                    if (max_dx == 0)
-                        return nullptr;
-
-                    int dx = 1 + g_rand.next_int(max_dx);
-                    moved_region = move_region.moved(-dx, 0, world, pop_map);
-                    break;
-                }
-            case 2: // down
-                {
-                    int max_dy = min(MAX_MOVE, parent_region.high_y - move_region.high_y);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != move_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.low_y >= move_region.high_y && intersect(move_region.low_x, move_region.high_x, reg.low_x, reg.high_x))
-                                upmin(max_dy, reg.low_y - move_region.high_y);
-                        }
-                    }
-                    for (auto& child : move_region_node->childs_nodes())
-                        upmin(max_dy, child->region.low_y - move_region.low_y);
-                    assert(max_dy >= 0);
-                    if (max_dy == 0)
-                        return nullptr;
-
-                    int dy = 1 + g_rand.next_int(max_dy);
-                    moved_region = move_region.moved(0, dy, world, pop_map);
-                    break;
-                }
-            case 3: // up
-                {
-                    int max_dy = min(MAX_MOVE, move_region.low_y - parent_region.low_y);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != move_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.high_y <= move_region.low_y && intersect(move_region.low_x, move_region.high_x, reg.low_x, reg.high_x))
-                                upmin(max_dy, move_region.low_y - reg.high_y);
-                        }
-                    }
-                    for (auto& child : move_region_node->childs_nodes())
-                        upmin(max_dy, move_region.high_y - child->region.high_y);
-                    assert(max_dy >= 0);
-                    if (max_dy == 0)
-                        return nullptr;
-
-                    int dy = 1 + g_rand.next_int(max_dy);
-                    moved_region = move_region.moved(0, -dy, world, pop_map);
-                    break;
-                }
-            default:
-                assert(false);
-        }
-        if (moved_region == parent_region)
-            return nullptr;
-
-        move_region_node->region = moved_region;
-
-        assert(parent_region.contain(move_region));
-        assert(tree->is_valid_tree());
-
-        ++mv_succ;
-        return tree;
-    };
-
-    int resizes = 0;
-    int resize_succ = 0;
-    const auto resize_region = [&](const RegionNode* tree_) -> unique_ptr<RegionNode>
-    {
-        auto tree = tree_->copy_tree();
-        auto nodes = tree->list_all(true);
-        if (nodes.empty())
-            return nullptr;
-        ++resizes;
-
-        RegionNode* resize_region_node = nodes[g_rand.next_int(nodes.size())];
-        const RegionNode* parent = resize_region_node->parent;
-        const Region& parent_region = parent->region;
-
-        const Region& resize_region = resize_region_node->region;
-        Region resized_region(-114514, -1919810, -114514 + 1, -1919810 + 1);
-        const int MAX_RESIZE = 20;
-        switch (g_rand.next_int(4))
-        {
-            case 0: // right
-                {
-                    int max_dx = min(MAX_RESIZE, parent_region.high_x - resize_region.high_x);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != resize_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.low_x >= resize_region.high_x && intersect(resize_region.low_y, resize_region.high_y, reg.low_y, reg.high_y))
-                                upmin(max_dx, reg.low_x - resize_region.high_x);
-                        }
-                    }
-                    for (auto& child : resize_region_node->childs_nodes())
-                        upmin(max_dx, child->region.low_x - resize_region.low_x);
-
-                    assert(max_dx >= 0);
-                    if (max_dx == 0)
-                        return nullptr;
-
-                    int dx = 1 + g_rand.next_int(max_dx);
-                    resized_region = resize_region.resized(dx, 0, world, pop_map);
-                    break;
-                }
-            case 1: // left
-                {
-                    int max_dx = min(MAX_RESIZE, resize_region.low_x - parent_region.low_x);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != resize_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.high_x <= resize_region.low_x && intersect(resize_region.low_y, resize_region.high_y, reg.low_y, reg.high_y))
-                                upmin(max_dx, resize_region.low_x - reg.high_x);
-                        }
-                    }
-                    for (auto& child : resize_region_node->childs_nodes())
-                        upmin(max_dx, resize_region.high_x - child->region.high_x);
-                    assert(max_dx >= 0);
-                    if (max_dx == 0)
-                        return nullptr;
-
-                    int dx = 1 + g_rand.next_int(max_dx);
-                    resized_region = resize_region.resized(-dx, 0, world, pop_map);
-                    break;
-                }
-            case 2: // down
-                {
-                    int max_dy = min(MAX_RESIZE, parent_region.high_y - resize_region.high_y);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != resize_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.low_y >= resize_region.high_y && intersect(resize_region.low_x, resize_region.high_x, reg.low_x, reg.high_x))
-                                upmin(max_dy, reg.low_y - resize_region.high_y);
-                        }
-                    }
-                    for (auto& child : resize_region_node->childs_nodes())
-                        upmin(max_dy, child->region.low_y - resize_region.low_y);
-                    assert(max_dy >= 0);
-                    if (max_dy == 0)
-                        return nullptr;
-
-                    int dy = 1 + g_rand.next_int(max_dy);
-                    resized_region = resize_region.resized(0, dy, world, pop_map);
-                    break;
-                }
-            case 3: // up
-                {
-                    int max_dy = min(MAX_RESIZE, resize_region.low_y - parent_region.low_y);
-                    for (auto& child : parent->childs_nodes())
-                    {
-                        if (child.get() != resize_region_node)
-                        {
-                            const Region& reg = child->region;
-                            if (reg.high_y <= resize_region.low_y && intersect(resize_region.low_x, resize_region.high_x, reg.low_x, reg.high_x))
-                                upmin(max_dy, resize_region.low_y - reg.high_y);
-                        }
-                    }
-                    for (auto& child : resize_region_node->childs_nodes())
-                        upmin(max_dy, resize_region.high_y - child->region.high_y);
-                    assert(max_dy >= 0);
-                    if (max_dy == 0)
-                        return nullptr;
-
-                    int dy = 1 + g_rand.next_int(max_dy);
-                    resized_region = resize_region.resized(0, -dy, world, pop_map);
-                    break;
-                }
-            default:
-                assert(false);
-        }
-        if (resized_region == parent_region)
-            return nullptr;
-
-        resize_region_node->region = resized_region;
-
-        assert(parent_region.contain(resize_region));
-        assert(tree->is_valid_tree());
-
-        ++resize_succ;
-        return tree;
-    };
-
-
-    const auto eval_official = [&](const RegionNode* tree)
-    {
-        auto min_pop = search_min_pop_for_area(tree);
-        int max_area = 0;
-        rep(i, min_pop.size())
-            if (min_pop[i] <= max_population)
-                max_area = i;
-
-        return max_area * pow(0.996, tree->tree_size());
-    };
-
-    const auto calc_opt_area = [&]()
-    {
-        vector<int> pops;
-        rep(y, world.height()) rep(x, world.width())
-            if (world.get(x, y))
-                pops.push_back(pop_map.pop(x, y));
-        sort(all(pops));
-        pops.push_back(max_population + 1);
-
-        ll sum_pop = 0;
-        rep(i, pops.size())
-        {
-            sum_pop += pops[i];
-            if (sum_pop > max_population)
-                return i;
-        }
-        assert(false);
-    };
-    const int opt_area = calc_opt_area();
-    const auto eval = [&](const RegionNode* tree)
-    {
-        auto min_pop = search_min_pop_for_area(tree);
-        int max_area = 0;
-        double score = -1e9;
-        rep(i, min_pop.size())
-        {
-//             if (min_pop[i] <= max_population * 1.2)
-//                 max_area = i;
-            double area_p = (double)i / opt_area;
-            double pop_p = (double)min_pop[i] / max_population;
-            double s = area_p - pop_p;
-            upmax(score, s);
-        }
-
-        return score;// * pow(0.996, tree->tree_size());
-    };
-
-    unique_ptr<RegionNode> best_tree = fixed_region_tree->copy_tree();
-    double best_score = eval_official(best_tree.get());
-    rep(simu_i, 3)
-    {
-        int last_best_i = -1;
-        unique_ptr<RegionNode> local_best_tree;
-        double local_best_score = -1e9;
-
-        unique_ptr<RegionNode> current_tree = fixed_region_tree->copy_tree();
-        current_tree->iterate([](RegionNode* no) { no->fixed = true; });
-        double current_score = eval(current_tree.get());
-
-        const int MAX_TRIES = 6000;
-        rep(try_i, MAX_TRIES)
-        {
-//             fprintf(stderr, "%6d: %3d, %f\n", try_i, current_tree->tree_size(), current_score);
-            assert(current_tree);
-            unique_ptr<RegionNode> next_tree;
-            vector<int> next_ratio = { 10, 1, 50, 50 };
-            if (current_tree->tree_size() >= 25)
-                next_ratio[0] = 0;
-            if (try_i > MAX_TRIES * 0.9)
-                next_ratio = { 0, 1, 0, 0 };
-            switch (g_rand.select(next_ratio))
-            {
-                case 0:
-                    next_tree = move(generate_region(current_tree.get()));
-                    break;
-                case 1:
-                    next_tree = move(remove_region(current_tree.get()));
-                    break;
-                case 2:
-                    next_tree = move(resize_region(current_tree.get()));
-                    break;
-                case 3:
-                    next_tree = move(move_region(current_tree.get()));
-                    break;
-                default:
-                    assert(false);
-            }
-            if (next_tree)
-            {
-                double official_score = eval_official(next_tree.get());
-                double score = eval(next_tree.get());
-                if (official_score > local_best_score)
-                {
-                    local_best_score = official_score;
-                    local_best_tree = next_tree->copy_tree();
-                    last_best_i = try_i;
-//                     fprintf(stderr, "%6d: %5.3f, %6d\n", try_i, local_best_score, search_max_area(local_best_tree.get(), max_population));
-                }
-                const double threshold = try_i < MAX_TRIES * 0.8 ? 0.9 : 1;
-                if (score > current_score * threshold || official_score + 1e-9 > local_best_score)
-                {
-                    current_tree = move(next_tree);
-                    current_score = score;
-                }
-            }
-            const int TO_BEST = try_i < MAX_TRIES * 0.9 ? 200 : 5;
-            if (local_best_tree && try_i - last_best_i > 200)
-            {
-                current_tree = local_best_tree->copy_tree();
-                current_score = eval(local_best_tree.get());
-                last_best_i = try_i;
-            }
-        }
-        if (!local_best_tree)
-            break;
-
-        if (local_best_score > best_score)
-        {
-            best_score = local_best_score;
-            best_tree = move(local_best_tree);
-        }
-    }
-
-//     dump(gens);
-//     dump(gen_succ);
-//     dump(rems);
-//     dump(rem_succ);
-//     dump(mvs);
-//     dump(mv_succ);
-//     dump(resizes);
-//     dump(resize_succ);
-    return best_tree;
-}
-
 struct SearchRegionResult
 {
     Region parent;
     Region region_a, region_b;
-    ll score = -1;
+    double score = -114514;
 
     bool is_valid() const
     {
-        return score != -1;
+        return score > -1;
     }
 };
-SearchRegionResult search_region_for_query(const BitBoard& world, const RegionNode* current_tree)
+SearchRegionResult search_region_for_query(const BitBoard& world, const ll max_population, const RegionNode* current_tree)
 {
+    const ll total_area = current_tree->region.area;
+    const ll total_population = current_tree->region.pop;
+
+    Timer timer;
+    timer.start();
+    const int MAX_PREDICTS = 1;
+    vector<PopMap> predict_pop_maps;
+    rep(i, MAX_PREDICTS)
+    {
+        auto cities = search_cities(world, current_tree);
+        predict_pop_maps.push_back(PopMap(world, cities));
+    }
+    dump(timer.get_elapsed());
+    const auto expect_pop = [&](const Region& region)
+    {
+        double sum_pop = 0;
+        for (auto& pop_map : predict_pop_maps)
+            sum_pop += pop_map.pop(region);
+        return sum_pop / predict_pop_maps.size();
+    };
+
+    const auto eval = [&](const Region& a, const Region& b)
+    {
+        double score = 0;
+        double area_score = (double)min(a.area, b.area) / total_area;
+        double a_pop = expect_pop(a);
+        double b_pop = expect_pop(b);
+        double pop_score = abs(a_pop - b_pop) / total_population;
+        score = area_score * pop_score;
+        score += area_score;
+        score -= min(a_pop, b_pop) / total_population;
+        return score;
+    };
+
     SearchRegionResult result;
     for (auto& node : current_tree->list_leaves(false))
     {
@@ -1510,8 +1090,9 @@ SearchRegionResult search_region_for_query(const BitBoard& world, const RegionNo
             left.area = world.count(left);
             right.area = world.count(right);
             assert(left.area + right.area == reg.area);
+            assert(left.width() * left.height() + right.width() * right.height() == reg.width() * reg.height());
 
-            ll score = min(left.area, right.area);
+            double score = eval(left, right);
             if (score > result.score)
             {
                 result.score = score;
@@ -1527,8 +1108,9 @@ SearchRegionResult search_region_for_query(const BitBoard& world, const RegionNo
             up.area = world.count(up);
             down.area = world.count(down);
             assert(up.area + down.area == reg.area);
+            assert(up.width() * up.height() + down.width() * down.height() == reg.width() * reg.height());
 
-            ll score = min(up.area, down.area);
+            double score = eval(up, down);
             if (score > result.score)
             {
                 result.score = score;
@@ -1566,7 +1148,7 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
     const Region whole_region(0, 0, world.width(), world.height(), total_area, total_population);
     unique_ptr<RegionNode> region_tree(new RegionNode(whole_region, nullptr, true));
 
-    const double target = (double)max_population / total_population;
+    const double target = (double)max_population / total_population * 100;
 
 //     while (true)
     vector<City> prepre;
@@ -1581,6 +1163,7 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
         TRIES = 16;
     else
         TRIES = 12;
+    TRIES = 22;
     rep(_, TRIES)
     {
 //         Timer timer;
@@ -1592,7 +1175,7 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
 //
 //         PopMap predict_pop_map(world, predict_cities);
 
-        SearchRegionResult result_for_query = search_region_for_query(world, region_tree.get());
+        SearchRegionResult result_for_query = search_region_for_query(world, max_population, region_tree.get());
         if (!result_for_query.is_valid())
             break;
 
@@ -1603,11 +1186,21 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
         region_b.pop = parent.pop - region_a.pop;
 //         assert(region_b.pop == query_region(region_b));
 
+//         dump(parent);
+//         dump(region_a);
+//         dump(region_b);
+
         RegionNode* node_to_insert = region_tree->find_node_to_insert(region_a);
+        assert(node_to_insert->childs.empty());
         assert(node_to_insert->region == parent);
         assert(node_to_insert == region_tree->find_node_to_insert(region_b));
         node_to_insert->add_child_region(region_a);
         node_to_insert->add_child_region(region_b);
+
+#ifndef NDEBUG
+        for (auto& node : region_tree->list_all(false))
+            assert(node->childs.empty() || node->childs.size() == 2);
+#endif
     }
 //     return mark_predict_cities(world, prepre);
 
