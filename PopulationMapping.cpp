@@ -1152,18 +1152,7 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
 
 //     while (true)
     vector<City> prepre;
-    int TRIES = 16;
-    if (target < 5)
-        TRIES = 22;
-    else if (target < 15)
-        TRIES = 20;
-    else if (target < 30)
-        TRIES = 18;
-    else if (target < 50)
-        TRIES = 16;
-    else
-        TRIES = 12;
-    TRIES = 22;
+    const int TRIES = 22;
     rep(_, TRIES)
     {
 //         Timer timer;
