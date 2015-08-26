@@ -1,5 +1,5 @@
 #ifndef LOCAL
-#define NDEBUG
+// #define NDEBUG
 #endif
 
 #include <cstdio>
@@ -312,7 +312,6 @@ public:
     PopMap(const BitBoard& world, const vector<City>& cities) :
         w(world.width()), h(world.height())
     {
-        assert(cities.size() >= 1);
         rep(y, h) rep(x, w)
         {
             if (world.get(x, y))
@@ -354,9 +353,11 @@ private:
     int w, h;
     int p[500][512];
 };
+#if 0
 #define CORRECT_POP
 #ifdef CORRECT_POP
 PopMap correct_pop_map;
+#endif
 #endif
 
 bool intersect(int a_low_x, int a_high_y, int b_low_x, int b_high_x)
@@ -384,6 +385,7 @@ struct Region
         assert(low_x < high_x);
         assert(low_y < high_y);
     }
+    Region() : Region(-114514, -1919, -114514 + 1, -1919 + 1){}
 
     int width() const { return high_x - low_x; }
     int height() const { return high_y - low_y; }
@@ -465,6 +467,10 @@ ostream& operator<<(ostream& os, const Region& region)
     return os;
 }
 }
+int query_region(const Region& region)
+{
+    return query_region(region.low_x, region.low_y, region.high_x, region.high_y);
+}
 
 struct RegionNode
 {
@@ -486,6 +492,7 @@ struct RegionNode
         copy_node->childs.reserve(childs.size());
         for (auto& child : childs)
             copy_node->childs.push_back(child->copy_tree(copy_node.get()));
+        assert(copy_node);
         return copy_node;
     }
 
@@ -494,11 +501,11 @@ struct RegionNode
         return childs;
     }
 
-    void add_child_region(const Region& reg)
+    void add_child_region(const Region& reg, bool fixed = false)
     {
         assert(region.contain(reg));
         assert(!intersect_with_child(reg));
-        childs.push_back(unique_ptr<RegionNode>(new RegionNode(reg, this, false)));
+        childs.push_back(unique_ptr<RegionNode>(new RegionNode(reg, this, fixed)));
     }
 
     void remove_child_region(const RegionNode* node_to_remove)
@@ -547,6 +554,36 @@ struct RegionNode
         int pop = region.pop;
         for (auto& child : childs)
             pop -= child->region.pop;
+        if (pop < 0)
+        {
+#ifdef CORRECT_POP 
+            dump(correct_pop_map.pop(region.low_x, region.low_y, region.high_x, region.high_y));
+#endif
+
+            // FIXME
+#if 0
+            cerr << "pop_except_childs" << endl;
+            dump(pop);
+#endif
+
+#if 0
+            dump(pop);
+            dump(region.pop);
+            dump(fixed);
+            dump(parent->fixed);
+
+            dump(parent->region);
+            dump(region);
+
+            dump(childs.size());
+            for (auto& child : childs)
+            {
+                dump(child->region);
+                dump(child->fixed);
+            }
+#endif
+            upmax(pop, 0);
+        }
         assert(pop >= 0);
         return pop;
     }
@@ -578,6 +615,34 @@ struct RegionNode
                     callback(x, y);
             }
         }
+    }
+
+    const RegionNode* find_node_to_insert(const Region& region) const
+    {
+        const RegionNode* min_area_node = nullptr;
+        int min_area = ten(9);
+        iterate([&](const RegionNode* node) {
+            if (node->region.area < min_area && node->region.contain(region))
+            {
+                min_area = node->region.area;
+                min_area_node = node;
+            }
+        });
+        return min_area_node;
+    }
+
+    RegionNode* find_node_to_insert(const Region& region)
+    {
+        RegionNode* min_area_node = nullptr;
+        int min_area = ten(9);
+        iterate([&](RegionNode* node) {
+            if (node->region.area < min_area && node->region.contain(region))
+            {
+                min_area = node->region.area;
+                min_area_node = node;
+            }
+        });
+        return min_area_node;
     }
 
     int tree_size() const
@@ -687,7 +752,9 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
     vector<City> current_cities;
     PopMap current_pop_map(world.width(), world.height());
     ll current_score = eval(current_pop_map);
-    rep(try_i, 1000)
+    int last_best_i = -1;
+    const int MAX_TRIES = 1000;
+    rep(try_i, MAX_TRIES)
     {
         vector<City> next_cities = current_cities;
         const vector<int> next_ratio = {
@@ -763,8 +830,10 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             best_cities = next_cities;
             best_pop_map = next_pop_map;
 
-            fprintf(stderr, "%6d: %9lld\n", try_i, best_score);
-            dump(best_cities);
+            last_best_i = try_i;
+
+//             fprintf(stderr, "%6d: %9lld\n", try_i, best_score);
+//             dump(best_cities);
         }
         if (next_score < current_score)
         {
@@ -772,6 +841,9 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             current_cities = next_cities;
             current_pop_map = next_pop_map;
         }
+
+        if (try_i - last_best_i > 0.2 * MAX_TRIES)
+            break;
     }
 
 #ifdef CORRECT_POP
@@ -796,6 +868,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
 
 vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
 {
+    assert(region_tree);
     const ll inf = ten(9);
     const int max_area = region_tree->region.area;
     vector<ll> min_pop(max_area + 1, inf); // min_pop[area] -> min pop
@@ -812,11 +885,17 @@ vector<ll> search_min_pop_for_area(const RegionNode* region_tree)
 }
 int search_max_area(const RegionNode* region_tree, const ll max_population)
 {
+    assert(region_tree);
     auto min_pop = search_min_pop_for_area(region_tree);
     for (int i = (int)min_pop.size() - 1; i >= 0; --i)
         if (min_pop[i] <= max_population)
             return i;
     return -1;
+}
+
+double search_max_score(const RegionNode* region_tree, const ll max_population)
+{
+    return search_max_area(region_tree, max_population) * pow(0.996, region_tree->tree_size() - 1);
 }
 
 BitBoard search_best_area_selection(const RegionNode* region_tree, const ll max_population)
@@ -865,7 +944,6 @@ BitBoard search_best_area_selection(const RegionNode* region_tree, const ll max_
     vector<bool> used_node(nodes.size());
     for (int i = use_node[nodes.size()][best_area], a = best_area; i >= 0; )
     {
-        dump(i);
         assert(0 <= i && i < nodes.size());
         assert(!used_node[i]);
         used_node[i] = true;
@@ -888,6 +966,18 @@ BitBoard search_best_area_selection(const RegionNode* region_tree, const ll max_
 
 unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_map, const ll max_population, const RegionNode* fixed_region_tree)
 {
+#ifndef NDEBUG
+    for (auto& node : fixed_region_tree->list_all(false))
+    {
+        assert(node->fixed);
+        const Region& reg = node->region;
+        assert(reg.area == world.count(reg.low_x, reg.low_y, reg.high_x, reg.high_y));
+#ifdef CORRECT_POP
+        assert(reg.pop == correct_pop_map.pop(reg.low_x, reg.low_y, reg.high_x, reg.high_y));
+#endif
+    }
+#endif
+
     const int total_area = world.count(0, 0, world.width(), world.height());
     const ll total_population = pop_map.pop(0, 0, world.width(), world.height());
     int gens = 0;
@@ -1244,7 +1334,7 @@ unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_m
 
     double best_score = -1;
     unique_ptr<RegionNode> best_tree;
-    rep(simu_i, 10)
+    rep(simu_i, 3)
     {
         int last_best_i = -1;
         double local_best_score = -1;
@@ -1254,10 +1344,11 @@ unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_m
         current_tree->iterate([](RegionNode* no) { no->fixed = true; });
         double current_score = eval(current_tree.get());
 
-        const int MAX_TRIES = 10000;
+        const int MAX_TRIES = 6000;
         rep(try_i, MAX_TRIES)
         {
 //             fprintf(stderr, "%6d: %3d, %f\n", try_i, current_tree->tree_size(), current_score);
+            assert(current_tree);
             unique_ptr<RegionNode> next_tree;
             vector<int> next_ratio = { 10, 1, 50, 50 };
             if (current_tree->tree_size() >= 25)
@@ -1290,7 +1381,7 @@ unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_m
                     local_best_score = official_score;
                     local_best_tree = next_tree->copy_tree();
                     last_best_i = try_i;
-                    fprintf(stderr, "%6d: %5.3f, %6d\n", try_i, local_best_score, search_max_area(local_best_tree.get(), max_population));
+//                     fprintf(stderr, "%6d: %5.3f, %6d\n", try_i, local_best_score, search_max_area(local_best_tree.get(), max_population));
                 }
                 const double threshold = try_i < MAX_TRIES * 0.8 ? 0.9 : 1;
                 if (score > current_score * threshold || official_score + 1e-9 > local_best_score)
@@ -1300,7 +1391,7 @@ unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_m
                 }
             }
             const int TO_BEST = try_i < MAX_TRIES * 0.9 ? 200 : 5;
-            if (try_i - last_best_i > 200)
+            if (local_best_tree && try_i - last_best_i > 200)
             {
                 current_tree = local_best_tree->copy_tree();
                 current_score = eval(local_best_tree.get());
@@ -1315,43 +1406,107 @@ unique_ptr<RegionNode> search_queries(const BitBoard& world, const PopMap& pop_m
         }
     }
 
-    dump(gens);
-    dump(gen_succ);
-    dump(rems);
-    dump(rem_succ);
-    dump(mvs);
-    dump(mv_succ);
-    dump(resizes);
-    dump(resize_succ);
+//     dump(gens);
+//     dump(gen_succ);
+//     dump(rems);
+//     dump(rem_succ);
+//     dump(mvs);
+//     dump(mv_succ);
+//     dump(resizes);
+//     dump(resize_succ);
     return best_tree;
 }
 
-BitBoard select(const ll max_population, const BitBoard& world, const ll total_population)
+struct SearchRegionResult
+{
+    Region region;
+    ll score = -1;
+
+    bool is_valid() const
+    {
+        return score != -1;
+    }
+};
+SearchRegionResult search_region_for_query(const RegionNode* tree, const RegionNode* prev_tree)
+{
+    SearchRegionResult result;
+    assert(!result.is_valid());
+
+    for (auto& node : tree->list_all(true))
+    {
+        const RegionNode* parent = prev_tree->find_node_to_insert(node->region);
+        assert(parent != nullptr);
+
+        ll score = min(node->region.area, parent->region.area - node->region.area);
+        if (score > result.score)
+        {
+            result.score = score;
+            result.region = node->region;
+        }
+    }
+    return result;
+}
+
+BitBoard select_area(const ll max_population, const BitBoard& world, const ll total_population)
 {
     const int total_area = world.count(0, 0, world.width(), world.height());
-    unique_ptr<RegionNode> root(new RegionNode(Region(0, 0, world.width(), world.height(), total_area, total_population), nullptr, true));
+    const Region whole_region(0, 0, world.width(), world.height(), total_area, total_population);
+    unique_ptr<RegionNode> region_tree(new RegionNode(whole_region, nullptr, true));
 
-    unique_ptr<RegionNode> tree = search_queries(world, correct_pop_map, max_population, root.get());
-    for (auto& node : tree->list_all(false))
+    while (true)
     {
-        const Region& region = node->region;
-        if (region.width() == world.width() && region.height() == world.height())
-            continue;
+        vector<City> predict_cities = search_cities(world, region_tree.get());
+        PopMap predict_pop_map(world, predict_cities);
 
-        query_region(region.low_x, region.low_y, region.high_x, region.high_y);
-        dump(region);
-//         for (int y = region.low_y; y < region.high_y; ++y)
-//             for (int x = region.low_x; x < region.high_x; ++x)
-//                 selected.set(x, y, true);
+        assert(region_tree);
+        unique_ptr<RegionNode> searched_region_tree =
+            search_queries(world, predict_pop_map, max_population, region_tree.get());
+        assert(searched_region_tree);
+
+        const double current_score = search_max_score(region_tree.get(), max_population);
+        const double next_score = search_max_score(searched_region_tree.get(), max_population);
+        if (next_score < current_score)
+            break;
+
+        SearchRegionResult result_for_query = search_region_for_query(searched_region_tree.get(), region_tree.get());
+        if (!result_for_query.is_valid())
+            break;
+
+        Region region = result_for_query.region;
+        assert(region.area == world.count(region.low_x, region.low_y, region.high_x, region.high_y));
+        const ll pop = query_region(region);
+        region.pop = pop;
+#ifdef CORRECT_POP
+        assert(region.pop == correct_pop_map.pop(region.low_x, region.low_y, region.high_x, region.high_y));
+#endif
+
+        RegionNode* node_to_insert = region_tree->find_node_to_insert(region);
+        assert(node_to_insert != nullptr);
+        node_to_insert->add_child_region(region, true);
     }
 
-    BitBoard selected = search_best_area_selection(tree.get(), max_population);
+//     for (auto& node : searched_region_tree->list_all(false))
+//     {
+//         const Region& region = node->region;
+//         if (region.width() == world.width() && region.height() == world.height())
+//             continue;
+//
+//         query_region(region.low_x, region.low_y, region.high_x, region.high_y);
+//         dump(region);
+// //         for (int y = region.low_y; y < region.high_y; ++y)
+// //             for (int x = region.low_x; x < region.high_x; ++x)
+// //                 selected.set(x, y, true);
+//     }
+
+    BitBoard selected = search_best_area_selection(region_tree.get(), max_population);
+#ifdef CORRECT_POP
     int selected_pop = 0;
     rep(y, world.height()) rep(x, world.width())
         if (selected.get(x, y) && world.get(x, y))
             selected_pop += correct_pop_map.pop(x, y);
     dump(selected_pop);
     fprintf(stderr, "pop: %.2f\n", (double)selected_pop / total_population);
+#endif
     return selected;
 }
 
@@ -1367,9 +1522,9 @@ public:
         const ll total_area = world.count(0, 0, world.width(), world.height());
 
 
-//         BitBoard selected = select(max_population, world, total_population);
-//         BitBoard selected = select(max_population, world, total_population);
-        BitBoard selected(world.width(), world.height());
+        BitBoard selected = select_area(max_population, world, total_population);
+        return make_string(selected);
+//         BitBoard selected(world.width(), world.height());
 
         unique_ptr<RegionNode> root(new RegionNode(Region(0, 0, world.width(), world.height(), total_area, total_population), nullptr, true));
         auto predict_cities = search_cities(world, root.get());
@@ -1386,14 +1541,18 @@ public:
                     selected.set(x, y, true);
         }
 
+        return make_string(selected);
+    }
+
+private:
+    vector<string> make_string(const BitBoard& selected)
+    {
         vector<string> res(selected.height(), string(selected.width(), '.'));
         rep(y, selected.height()) rep(x, selected.width())
             if (selected.get(x, y))
                 res[y][x] = 'X';
         return res;
     }
-
-private:
 #ifdef LOCAL
     struct SurveyResult
     {
