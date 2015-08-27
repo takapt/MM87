@@ -40,10 +40,18 @@ def single(seeds):
         print('{:5d} {:10.2f} {:.3f}'.format(seed, result['score'], result['time']))
         sys.stdout.flush()
 
+def get_s(result):
+    seed = result['seed']
+    return '{:5d} {:10.2f} {:.3f}'.format(seed, result['score'], result['time'])
+
+def run(seed):
+    r = get_score(seed)
+    sys.stderr.write(get_s(r) + '\n')
+    return r
 def multi(seeds):
     from multiprocessing import Pool
     pool = Pool()
-    results = pool.map(get_score, seeds)
+    results = pool.map(run, seeds)
     for result in results:
         seed = result['seed']
         print('{:5d} {:10.2f} {:.3f}'.format(seed, result['score'], result['time']))
