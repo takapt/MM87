@@ -99,7 +99,9 @@ double get_absolute_sec()
     double get_ms() { struct timeval t; gettimeofday(&t, NULL); return (double)t.tv_sec * 1000 + (double)t.tv_usec / 1000; }
 #endif
 
+#ifndef LOCAL
 #define USE_RDTSC
+#endif
 class Timer
 {
 private:
@@ -1019,6 +1021,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree, 
         if (current_score < total_population * 0.2 && best_cities.size() >= 5 && try_i - last_best_i > 0.1 * MAX_TRIES)
             break;
     }
+//     fprintf(stderr, "predict: %9lld, %5.4f\n", best_score, (double)best_score / total_population);
 
 #ifdef CORRECT_POP
     ll sum_diff = 0;
@@ -1237,8 +1240,8 @@ unique_ptr<RegionNode> build_div_reiong_tree(const BitBoard& world, const ll tot
     const Region whole_region(0, 0, world.width(), world.height(), total_area, total_population);
     unique_ptr<RegionNode> region_tree(new RegionNode(whole_region, nullptr, true));
 
-    int DIV_SIZE = 20;
-    while (DIV_SIZE * DIV_SIZE * 15 < total_area)
+    int DIV_SIZE = 10;
+    while (DIV_SIZE * DIV_SIZE * 10 < total_area)
         ++DIV_SIZE;
     dump(DIV_SIZE);
     const int DIV_H = DIV_SIZE;
@@ -1285,12 +1288,14 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
     const int total_area = world.count(0, 0, world.width(), world.height());
     unique_ptr<RegionNode> region_tree = build_div_reiong_tree(world, total_population);
 
-    vector<City> prev_predict_cities;
+    vector<vector<City>> prev_predict_cities;
     const int MAX_QUERIES = 50;
     rep(query_i, MAX_QUERIES)
     {
         if (g_timer.get_elapsed() > G_TL_SEC * 0.9)
             break;
+
+        int tries = 0;
 
         vector<vector<City>> predict_cities;
         vector<PopMap> predict_pop_maps;
@@ -1300,21 +1305,30 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
 #else
         Timer timer;
         timer.start();
-        const int MAX_PREDICTS = 1;
+        const int MAX_PREDICTS = 2;
+        while (prev_predict_cities.size() < MAX_PREDICTS)
+            prev_predict_cities.push_back({});
         rep(i, MAX_PREDICTS)
         {
-            auto cities = search_cities(world, region_tree->copy_fixed_tree().get(), prev_predict_cities);
-            predict_cities.push_back(cities);
+            if (g_timer.get_elapsed() > G_TL_SEC * 0.9)
+                break;
+
+            assert(i < prev_predict_cities.size());
+            auto cities = search_cities(world, region_tree->copy_fixed_tree().get(), prev_predict_cities[i]);
             predict_pop_maps.push_back(PopMap(world, cities));
+            predict_cities.push_back(cities);
         }
 //         fprintf(stderr, "search_cities time: %f\n", timer.get_elapsed());
-        prev_predict_cities = predict_cities[0];
-//         if (query_i == 5)
+        prev_predict_cities = predict_cities;
+//         if (query_i == 1)
 //         {
 //             assert(predict_cities.size() >= 1);
 //             return mark_predict_cities(world, predict_cities[0]);
 //         }
 #endif
+
+        if (g_timer.get_elapsed() > G_TL_SEC * 0.9)
+            break;
 
         const auto expect_pop = [&](const Region& region)
         {
@@ -1326,7 +1340,11 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
 
         SearchRegionResult result_for_query = search_region_for_query(world, max_population, region_tree.get(), expect_pop);
         if (!result_for_query.is_valid())
+        {
+            if (query_i < 10 && tries < 10)
+                continue;
             break;
+        }
 
         const Region& region = result_for_query.region;
 
