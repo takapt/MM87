@@ -20,8 +20,8 @@ for seed in seeds:
     ratio = y / x
     sum_ratio += ratio
 
-    if ratio < 0.9:
-        print('{:>5} {:>10} {:>10} {:>7.3f}'.format(seed, x, y, ratio))
+#     if ratio < 0.9:
+    print('{:>5} {:>10} {:>10} {:>7.3f}'.format(seed, x, y, ratio))
 
 total_ratio = sum_ratio / len(seeds)
 print('total_ratio: {}'.format(total_ratio))
