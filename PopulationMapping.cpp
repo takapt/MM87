@@ -830,17 +830,17 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
     {
         vector<City> next_cities = current_cities;
         const vector<int> next_ratio = {
-            current_cities.size() > 0 ? 10 : 0, // move
-            current_cities.size() > 0 ? 5 : 0, //change scale 
+            current_cities.size() >= 5 ? 10 : 0, // move
+            current_cities.size() >= 5 ? 5 : 0, //change scale 
             current_cities.size() < MAX_CITIES ? 5 : 0, // generate
-            current_cities.size() > 0 ? 5 : 0 // remove
+            current_cities.size() > 5 ? 1 : 0 // remove
         };
         switch (g_rand.select(next_ratio))
         {
             case 0:
             {
                 // move
-                assert(current_cities.size() > 0);
+                assert(current_cities.size() >= 5);
                 int city_i = g_rand.next_int(next_cities.size());
                 City& city = next_cities[city_i];
 
@@ -858,7 +858,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             case 1:
             {
                 // change scale
-                assert(current_cities.size() > 0);
+                assert(current_cities.size() >= 5);
                 int city_i = g_rand.next_int(next_cities.size());
                 City& city = next_cities[city_i];
 
@@ -884,7 +884,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             case 3:
             {
                 // remove
-                assert(current_cities.size() > 0);
+                assert(current_cities.size() > 5);
                 int city_i = g_rand.next_int(next_cities.size());
                 next_cities.erase(next_cities.begin() + city_i);
 
@@ -893,10 +893,15 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             default:
                 assert(false);
         }
+        if (current_cities.size() < 4)
+        {
+            current_cities = next_cities;
+            continue;
+        }
 
         PopMap next_pop_map(world, next_cities);
         ll next_score = eval(next_pop_map);
-        if (next_score < best_score)
+        if (next_cities.size() >= 5 && next_score < best_score)
         {
             best_score = next_score;
             best_cities = next_cities;
@@ -905,8 +910,8 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             last_best_i = try_i;
 
 #if 0
-#ifdef CORRECT_POP
             fprintf(stderr, "%6d: %9lld, %5.4f\n", try_i, best_score, (double)best_score / total_population);
+#ifdef CORRECT_POP
             ll truth_diff = 0;
             const int BOX_H = 20, BOX_W = 20;
             for (int ly = 0; ly < world.height(); ly += BOX_H)
@@ -945,7 +950,7 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
             current_pop_map = next_pop_map;
         }
 
-        if (try_i - last_best_i > 0.1 * MAX_TRIES)
+        if (best_cities.size() >= 5 && try_i - last_best_i > 0.1 * MAX_TRIES)
             break;
     }
 
@@ -961,10 +966,10 @@ vector<City> search_cities(const BitBoard& world, const RegionNode* fixed_tree)
     }
     const double diff_p = (double)sum_diff / total_population;
     assert(total_population == fixed_tree->region.pop);
-    dump(total_population);
-    dump(sum_diff);
-    dump(diff_p);
-    cerr << endl;
+//     dump(total_population);
+//     dump(sum_diff);
+//     dump(diff_p);
+//     cerr << endl;
 #endif
 
     return best_cities;
@@ -1199,7 +1204,7 @@ BitBoard mark_predict_cities(const BitBoard& world, const vector<City>& cities)
     for (auto& city : cities)
     {
         dump(city);
-        const int s = city.scale * 2;
+        const int s = city.scale * 3;
         int lx = max(0, city.x - s);
         int ly = max(0, city.y - s);
         int hx = min(world.width(), city.x + s);
@@ -1225,12 +1230,18 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
             break;
 
         const int MAX_PREDICTS = 1;
+        vector<vector<City>> predict_cities;
         vector<PopMap> predict_pop_maps;
+//         predict_pop_maps = {correct_pop_map};
         rep(i, MAX_PREDICTS)
         {
             auto cities = search_cities(world, region_tree.get());
+            predict_cities.push_back(cities);
             predict_pop_maps.push_back(PopMap(world, cities));
         }
+//         if (query_i == 10)
+//             return mark_predict_cities(world, predict_cities[0]);
+
         //     predict_pop_maps.push_back(correct_pop_map);
         const auto expect_pop = [&](const Region& region)
         {
@@ -1293,7 +1304,7 @@ public:
         const ll total_area = world.count(0, 0, world.width(), world.height());
 
         BitBoard selected = select_area(max_population, world, total_population);
-        fprintf(stderr, "run time: %f\n", g_timer.get_elapsed());
+        fprintf(stderr, "run time: %f\n\n", g_timer.get_elapsed());
         return make_string(selected);
     }
 
@@ -1571,3 +1582,4 @@ int main(int argc, char* argv[])
     cout.flush();
 }
 #endif
+
