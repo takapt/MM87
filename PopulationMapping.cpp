@@ -373,10 +373,12 @@ private:
     int w, h;
     int p[500][512];
 };
-#if 0
+
+#if 1
 #define CORRECT_POP
 #ifdef CORRECT_POP
 PopMap correct_pop_map;
+#define PREDICT_PERFECT
 #endif
 #endif
 
@@ -1223,26 +1225,29 @@ BitBoard select_area(const ll max_population, const BitBoard& world, const ll to
     unique_ptr<RegionNode> region_tree = build_div_reiong_tree(world, total_population);
 
     vector<City> prepre;
-    const int TRIES = 50;
+    const int TRIES = 40;
     rep(query_i, TRIES)
     {
         if (g_timer.get_elapsed() > G_TL_SEC * 0.9)
             break;
 
-        const int MAX_PREDICTS = 1;
         vector<vector<City>> predict_cities;
         vector<PopMap> predict_pop_maps;
-//         predict_pop_maps = {correct_pop_map};
+#ifdef PREDICT_PERFECT
+        const int MAX_PREDICTS = 1;
+        predict_pop_maps = {correct_pop_map};
+#else
+        const int MAX_PREDICTS = 1;
         rep(i, MAX_PREDICTS)
         {
             auto cities = search_cities(world, region_tree.get());
             predict_cities.push_back(cities);
             predict_pop_maps.push_back(PopMap(world, cities));
         }
-//         if (query_i == 10)
+//         if (query_i == 2)
 //             return mark_predict_cities(world, predict_cities[0]);
+#endif
 
-        //     predict_pop_maps.push_back(correct_pop_map);
         const auto expect_pop = [&](const Region& region)
         {
             double sum_pop = 0;
@@ -1560,6 +1565,9 @@ int main(int argc, char* argv[])
     LOG_INPUT(total_population);
 
 #ifdef CORRECT_POP
+    cout << "pop" << endl;
+    cout.flush();
+
     int h, w;
     cin >> h >> w;
     LOG_INPUT(h);

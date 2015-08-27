@@ -260,23 +260,29 @@ public class PopulationMappingVis {
                 for (i = 0; i < height; ++i)
                     sb.append(map[i]).append('\n');
                 sb.append(totalPopulation).append('\n');
-                if (printPop)
-                {
-                    int h = map.length;
-                    int w = map[0].length();
-                    sb.append(h).append('\n');
-                    sb.append(w).append('\n');
-                    for (int y = 0; y < h; ++y)
-                        for (int x = 0; x < w; ++x)
-                            sb.append(pop[y][x]).append('\n');
-                }
                 os.write(sb.toString().getBytes());
                 os.flush();
 
                 // imitate queries - they start with "?" in separate line followed by a line with 4 params
                 String s;
                 int row;
-                while ((s = br.readLine()).equals("?")) {
+                while ((s = br.readLine()) != null) {
+                    if (s.equals("pop")) {
+                        StringBuffer sbsb = new StringBuffer();
+                        int h = map.length;
+                        int w = map[0].length();
+                        sbsb.append(h).append('\n');
+                        sbsb.append(w).append('\n');
+                        for (int y = 0; y < h; ++y)
+                            for (int x = 0; x < w; ++x)
+                                sbsb.append(pop[y][x]).append('\n');
+                        os.write(sbsb.toString().getBytes());
+                        os.flush();
+                        continue;
+                    }
+                    else if (!s.equals("?"))
+                        break;
+
                     // get params of next call
                     String[] params = br.readLine().split(" ");
                     if (params.length != 4) {
